@@ -16,6 +16,27 @@ struct Game {
     map: Map,
 }
 
+// A rectangle on the map, used to characterise a room
+#[derive(Clone, Copy, Debug)]
+struct Rect {
+    x1: i32,
+    y1: i32,
+    x2: i32,
+    y2: i32,
+}
+
+//Rectangle stores the coordinates for the top-left and bottom-right points
+impl Rect {
+    pub fn new(x: i32, y: i32, w: i32, h: i32) -> Self {
+        Rect {
+            x1: x,
+            y1: y,
+            x2: x + w,
+            y2: y + h,
+        }
+    }
+}
+
 const COLOR_DARK_WALL: Color = Color { r: 0, g: 0, b: 100 };
 const COLOR_DARK_GROUND: Color = Color {
     r: 50,
@@ -88,6 +109,17 @@ impl Tile {
     }
 }
 
+//takes in the rect and places it in the map
+fn create_room(room: Rect, map: &mut Map) {
+    //go through the tiles in the rectangle and make them passable
+    //the A..B notation specifies a range that's inclusive at the beginning but exclusive at the end
+    for x in (room.x1 + 1)..room.x2 {
+        for y in (room.y1 + 1)..room.y2 {
+            map[x as usize][y as usize] = Tile::empty();
+        }
+    }
+}
+
 //&mut = borrowing the values, otherwise it would be consumed by the first handle_keys call
 fn handle_keys(tcod: &mut Tcod, game: &Game, player: &mut Object) -> bool {
     //for keyinput
@@ -126,8 +158,11 @@ fn make_map() -> Map {
     //z.B. vec!['a',42] creates a Vector containing the letter 'a' 42 times
     let mut map = vec![vec![Tile::empty(); MAP_HEIGHT as usize]; MAP_WIDTH as usize];
 
-    map[30][22] = Tile::wall();
-    map[50][22] = Tile::wall();
+    //create two rooms
+    let room1 = Rect::new(20, 15, 10, 15);
+    let room2 = Rect::new(50, 15, 10, 15);
+    create_room(room1, &mut map);
+    create_room(room2, &mut map);
 
     map
 }
@@ -183,7 +218,7 @@ fn main() {
     //tcod::system::set_fps(LIMIT_FPS);
 
     //create object representing the player
-    let player = Object::new(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, '@', WHITE);
+    let player = Object::new(25, 23, '@', WHITE);
     //create an NPC
     let npc = Object::new(SCREEN_WIDTH / 2 - 5, SCREEN_HEIGHT / 2, '@', YELLOW);
     //the list of objects with those two
