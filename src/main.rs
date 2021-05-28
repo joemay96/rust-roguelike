@@ -5,6 +5,24 @@ use tcod::console::*;
 const SCREEN_WIDTH: i32 = 80;
 const SCREEN_HEIGHT: i32 = 50;
 
+//Size of the Map
+const MAP_WIDTH: i32 = 80;
+const MAP_HEIGHT: i32 = 45;
+
+//The Map is a Vec of Vectors of Tiles
+//with the type Keyword we can pass map and not Vec<Vec<Tile>> as type
+type Map = Vec<Vec<Tile>>;
+struct Game {
+    map: Map,
+}
+
+const COLOR_DARK_WALL: Color = Color { r: 0, g: 0, b: 100 };
+const COLOR_DARK_GROUND: Color = Color {
+    r: 50,
+    g: 50,
+    b: 150,
+};
+
 const LIMIT_FPS: i32 = 20; //20 frames-per-second max
 
 struct Tcod {
@@ -15,6 +33,8 @@ struct Tcod {
 //This is a generic object: player, moster, item
 //it's always represented by a character on the screen
 //to not hav the vars everywhere we define an object
+//We don’t want the Copy behaviour for Object (we could accidentally modify a copy instead of the original and get our changes lost for example), but Debug is useful, so let’s add the Debug derive to our Object as well:
+#[derive(Debug)]
 struct Object {
     x: i32,
     y: i32,
@@ -28,9 +48,11 @@ impl Object {
     }
 
     //movement
-    pub fn move_by(&mut self, dx: i32, dy: i32) {
-        self.x += dx;
-        self.y += dy;
+    pub fn move_by(&mut self, dx: i32, dy: i32, game: &Game) {
+        if !game.map[(self.x + dx) as usize][(self.y + dy) as usize].blocked {
+            self.x += dx;
+            self.y += dy;
+        }
     }
 
     //set the color and then draw the character that represents thisobject at its position
@@ -41,8 +63,33 @@ impl Object {
     }
 }
 
+//Tile struct, so we have the ability to define some structs later on
+//The #[derive(…​)] bit automatically implements certain behaviours (Rust calls them traits, other languages use interfaces) you list there.
+//Debug is to let us print the Tile’s contents and Clone and Copy will let us copy the values on assignment or function call instead of moving them. So they’ll behave like e.g. integers in this respect.
+#[derive(Clone, Copy, Debug)]
+struct Tile {
+    blocked: bool,
+    block_sight: bool,
+}
+
+impl Tile {
+    pub fn empty() -> Self {
+        Tile {
+            blocked: false,
+            block_sight: false,
+        }
+    }
+
+    pub fn wall() -> Self {
+        Tile {
+            blocked: true,
+            block_sight: true,
+        }
+    }
+}
+
 //&mut = borrowing the values, otherwise it would be consumed by the first handle_keys call
-fn handle_keys(tcod: &mut Tcod, player: &mut Object) -> bool {
+fn handle_keys(tcod: &mut Tcod, game: &Game, player: &mut Object) -> bool {
     //for keyinput
     use tcod::input::Key;
     use tcod::input::KeyCode::*;
@@ -62,14 +109,59 @@ fn handle_keys(tcod: &mut Tcod, player: &mut Object) -> bool {
         Key { code: Escape, .. } => return true, //exit game
         //key movements
         //.. means i don't care about the others fileds
-        Key { code: Up, .. } => player.move_by(0, -1),
-        Key { code: Down, .. } => player.move_by(0, 1),
-        Key { code: Left, .. } => player.move_by(-1, 0),
-        Key { code: Right, .. } => player.move_by(1, 0),
+        Key { code: Up, .. } => player.move_by(0, -1, game),
+        Key { code: Down, .. } => player.move_by(0, 1, game),
+        Key { code: Left, .. } => player.move_by(-1, 0, game),
+        Key { code: Right, .. } => player.move_by(1, 0, game),
 
         _ => {}
     }
     false
+}
+
+//creating the map
+fn make_map() -> Map {
+    //fill map with "unblocked" tiles
+    //vec! is a shortcut and creates a vector and fills it with random values
+    //z.B. vec!['a',42] creates a Vector containing the letter 'a' 42 times
+    let mut map = vec![vec![Tile::empty(); MAP_HEIGHT as usize]; MAP_WIDTH as usize];
+
+    map[30][22] = Tile::wall();
+    map[50][22] = Tile::wall();
+
+    map
+}
+
+//render function that renders the objects and the map
+fn render_all(tcod: &mut Tcod, game: &Game, objects: &[Object]) {
+    //Draw all objects in the list
+    for object in objects {
+        object.draw(&mut tcod.con);
+    }
+    //going through all the tiles and and set their background color
+    for y in 0..MAP_HEIGHT {
+        for x in 0..MAP_WIDTH {
+            let wall = game.map[x as usize][y as usize].block_sight;
+            if wall {
+                tcod.con
+                    .set_char_background(x, y, COLOR_DARK_WALL, BackgroundFlag::Set);
+            } else {
+                tcod.con
+                    .set_char_background(x, y, COLOR_DARK_GROUND, BackgroundFlag::Set);
+            }
+        }
+    }
+
+    //blit call from the main function
+    blit(
+        &tcod.con,
+        (0, 0),
+        (MAP_WIDTH, MAP_HEIGHT),
+        &mut tcod.root,
+        (0, 0),
+        1.0,
+        1.0,
+    );
 }
 
 fn main() {
@@ -83,7 +175,7 @@ fn main() {
         .init();
 
     //creating a offline console
-    let con = Offscreen::new(SCREEN_WIDTH, SCREEN_HEIGHT);
+    let con = Offscreen::new(MAP_WIDTH, MAP_HEIGHT);
 
     let mut tcod = Tcod { root, con };
 
@@ -96,6 +188,12 @@ fn main() {
     let npc = Object::new(SCREEN_WIDTH / 2 - 5, SCREEN_HEIGHT / 2, '@', YELLOW);
     //the list of objects with those two
     let mut objects = [player, npc];
+
+    //creating th egame Object
+    let game = Game {
+        //generate map (not draw to the scren jet)
+        map: make_map(),
+    };
 
     //Adding a Game Loop
     //window_closed() returns true if the window was closed, else false
@@ -120,23 +218,15 @@ fn main() {
             object.draw(&mut tcod.con);
         }
 
-        blit(
-            &tcod.con,
-            (0, 0),
-            (SCREEN_WIDTH, SCREEN_HEIGHT),
-            &mut tcod.root,
-            (0, 0),
-            1.0,
-            1.0,
-        );
-
+        //rendering the objects
+        render_all(&mut tcod, &game, &objects);
         //drawing everything onto the screen
         tcod.root.flush();
         //we also need to call wait_for_keypress even though we’re not processing keyboard input yet. This is because libtcod handles the window manager’s events (including your request to close the window) in the input processing code.
         //If we didn’t call it, window_close would not work properly and the game would crash or hang.
         //handling input
         let player = &mut objects[0];
-        let exit = handle_keys(&mut tcod, player);
+        let exit = handle_keys(&mut tcod, &game, player);
         if exit {
             break;
         }
